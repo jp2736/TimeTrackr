@@ -2296,9 +2296,9 @@ class TimeTrackrApp:
             plat.MenuItem("Open Dashboard", self.show_dashboard, default=True),
             plat.SEPARATOR,
             plat.MenuItem("Start Tracking", self.show_start,
-                          enabled_when=lambda: self._entry_id is None),
+                          visible_when=lambda: self._entry_id is None),
             plat.MenuItem("Stop Tracking", self.do_stop,
-                          enabled_when=lambda: self._entry_id is not None),
+                          visible_when=lambda: self._entry_id is not None),
             plat.SEPARATOR,
             plat.MenuItem("Quit", self._quit),
         ]
@@ -2307,6 +2307,9 @@ class TimeTrackrApp:
 
     def _update_tray(self):
         self.tray.update_icon()
+
+    def is_tracking(self):
+        return self._entry_id is not None
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
