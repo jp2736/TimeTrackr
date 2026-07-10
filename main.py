@@ -2101,14 +2101,14 @@ class MainWindow(tk.Toplevel):
         # Toolbar
         tb = tk.Frame(self, pady=6)
         tb.pack(fill="x", padx=10)
-        ttk.Button(tb, text="▶  Start",       command=self.app.show_start).pack(side="left", padx=2)
-        ttk.Button(tb, text="■  Stop",         command=self.app.do_stop).pack(side="left",   padx=2)
-        ttk.Button(tb, text="+ Log Past Time", command=self._log_past).pack(side="left",    padx=2)
+        self._toggle_btn = ttk.Button(tb, text="▶  Start", command=self._toggle_track)
+        self._toggle_btn.pack(side="left", padx=2)
+        ttk.Button(tb, text="+ Log Past Time", command=self._log_past).pack(side="left", padx=2)
         ttk.Separator(tb, orient="vertical").pack(side="left", fill="y", padx=8, pady=2)
-        ttk.Button(tb, text="Manage Jobs…",    command=self._manage_jobs).pack(side="left", padx=2)
+        ttk.Button(tb, text="Manage jobs and projects", command=self._manage_jobs).pack(side="left", padx=2)
         ttk.Separator(tb, orient="vertical").pack(side="left", fill="y", padx=8, pady=2)
-        ttk.Button(tb, text="Generate Invoice…", command=self._generate_invoice).pack(side="left", padx=2)
-        ttk.Button(tb, text="Invoice Settings…", command=self._invoice_settings).pack(side="left", padx=2)
+        ttk.Button(tb, text="Generate Invoice", command=self._generate_invoice).pack(side="left", padx=2)
+        ttk.Button(tb, text="Invoice Settings", command=self._invoice_settings).pack(side="left", padx=2)
 
         # Tabs
         nb = ttk.Notebook(self)
@@ -2183,9 +2183,11 @@ class MainWindow(tk.Toplevel):
         self._refresh_summary("month")
         self._cal_tab.draw()
         self._tax_tab.refresh()
+        self._refresh_toggle_btn()
 
     def _tick(self):
         self._refresh_status()
+        self._refresh_toggle_btn()
         self._tick_id = self.after(1000, self._tick)
 
     def _refresh_status(self):
@@ -2196,6 +2198,19 @@ class MainWindow(tk.Toplevel):
             self._status_lbl.config(text=f"Tracking: {entry['job_name']}{proj}  [{fmt_hms(elapsed)}]")
         else:
             self._status_lbl.config(text="Not tracking")
+
+    def _refresh_toggle_btn(self):
+        if self.app.is_tracking():
+            self._toggle_btn.config(text="■  Stop")
+        else:
+            self._toggle_btn.config(text="▶  Start")
+
+    def _toggle_track(self):
+        if self.app.is_tracking():
+            self.app.do_stop()
+        else:
+            self.app.show_start()
+        self._refresh_toggle_btn()
 
     def _refresh_recent(self):
         for r in self._recent_tree.get_children():
