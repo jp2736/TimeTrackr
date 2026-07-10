@@ -578,6 +578,41 @@ def ask_string(parent, title, prompt, initial=""):
     return result[0]
 
 
+def ask_choice(parent, title, prompt, options):
+    """Modal single-choice picker. Returns the selected index, or None if cancelled."""
+    dlg = tk.Toplevel(parent)
+    dlg.title(title)
+    dlg.resizable(False, False)
+    dlg.grab_set()
+    result = {"idx": None}
+
+    f = tk.Frame(dlg, padx=16, pady=12)
+    f.pack()
+    tk.Label(f, text=prompt, anchor="w").pack(fill="x", pady=(0, 6))
+    var = tk.StringVar(value=options[0] if options else "")
+    cb = ttk.Combobox(f, textvariable=var, values=list(options),
+                      state="readonly", width=28)
+    cb.pack()
+    if options:
+        cb.current(0)
+
+    def ok(_=None):
+        result["idx"] = cb.current()
+        dlg.destroy()
+
+    bf = tk.Frame(f)
+    bf.pack(pady=(10, 0))
+    ttk.Button(bf, text="OK", command=ok).pack(side="left", padx=5)
+    ttk.Button(bf, text="Cancel", command=dlg.destroy).pack(side="left", padx=5)
+
+    cx = parent.winfo_screenwidth() // 2 - 160
+    cy = parent.winfo_screenheight() // 2 - 80
+    dlg.geometry(f"+{cx}+{cy}")
+    dlg.focus_force()
+    parent.wait_window(dlg)
+    return result["idx"]
+
+
 # ── Invoice PDF generator ─────────────────────────────────────────────────────
 
 def generate_invoice_pdf(data, out_path):
@@ -1614,15 +1649,25 @@ class ManageJobsWindow(tk.Toplevel):
         self.on_change()
 
     def _add_proj(self):
-        job_id = self._job_id_for_sel()
-        if not job_id:
+        jobs = list(self.db.jobs())
+        job_ids = [j["id"] for j in jobs]
+        action, job_id = resolve_project_job(self._job_id_for_sel(), job_ids)
+
+        if action == "empty":
             messagebox.showinfo(
-                "Select a job first",
-                "Click on a job (or one of its projects) before adding a project.",
+                "No jobs yet",
+                "Add a job first, then you can add projects under it.",
                 parent=self,
             )
             return
-        job_name = self._tree.item(f"j{job_id}", "text").strip()
+        if action == "choose":
+            names = [j["name"] for j in jobs]
+            idx = ask_choice(self, "Add Project", "Which job is this project under?", names)
+            if idx is None:
+                return
+            job_id = jobs[idx]["id"]
+
+        job_name = next(j["name"] for j in jobs if j["id"] == job_id)
         name = ask_string(self, "Add Project", f"Project name  (under '{job_name}'):")
         if not name:
             return
