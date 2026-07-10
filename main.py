@@ -501,6 +501,52 @@ def make_tray_icon(tracking=False):
     return img
 
 
+class PlaceholderEntry(tk.Entry):
+    """Entry that shows greyed example text when empty and unfocused.
+
+    get_value() returns "" while the placeholder is displayed so placeholder
+    text never leaks into saved settings or a generated PDF.
+    """
+
+    def __init__(self, master, placeholder="", color="#9AA0A6", **kw):
+        super().__init__(master, **kw)
+        self._placeholder = placeholder
+        self._ph_color = color
+        self._default_fg = self.cget("fg")
+        self._is_placeholder = False
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
+        self._show_placeholder()
+
+    def _show_placeholder(self):
+        self.delete(0, tk.END)
+        self.insert(0, self._placeholder)
+        self.config(fg=self._ph_color)
+        self._is_placeholder = True
+
+    def _on_focus_in(self, _=None):
+        if self._is_placeholder:
+            self.delete(0, tk.END)
+            self.config(fg=self._default_fg)
+            self._is_placeholder = False
+
+    def _on_focus_out(self, _=None):
+        if not self.get():
+            self._show_placeholder()
+
+    def get_value(self):
+        return "" if self._is_placeholder else self.get()
+
+    def set_value(self, text):
+        if text:
+            self.config(fg=self._default_fg)
+            self._is_placeholder = False
+            self.delete(0, tk.END)
+            self.insert(0, text)
+        else:
+            self._show_placeholder()
+
+
 def ask_string(parent, title, prompt, initial=""):
     dlg = tk.Toplevel(parent)
     dlg.title(title)
