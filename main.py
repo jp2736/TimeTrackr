@@ -30,6 +30,45 @@ JOB_COLORS = [
     "#9C27B0", "#00BCD4", "#795548", "#607D8B",
 ]
 
+# ── Country / dialling-code reference ─────────────────────────────────────────
+# (name, dial_code). Curated common set; the country combobox is editable so
+# anything not listed can still be typed. Plain text only — flag emoji do not
+# render in Tkinter comboboxes on Windows.
+COUNTRIES = [
+    ("United Kingdom", "+44"), ("United States", "+1"), ("Ireland", "+353"),
+    ("Canada", "+1"), ("Australia", "+61"), ("New Zealand", "+64"),
+    ("Germany", "+49"), ("France", "+33"), ("Spain", "+34"), ("Italy", "+39"),
+    ("Netherlands", "+31"), ("Belgium", "+32"), ("Switzerland", "+41"),
+    ("Austria", "+43"), ("Sweden", "+46"), ("Norway", "+47"), ("Denmark", "+45"),
+    ("Finland", "+358"), ("Portugal", "+351"), ("Poland", "+48"),
+    ("Czech Republic", "+420"), ("India", "+91"), ("Singapore", "+65"),
+    ("Hong Kong", "+852"), ("Japan", "+81"), ("South Africa", "+27"),
+    ("United Arab Emirates", "+971"), ("Brazil", "+55"), ("Mexico", "+52"),
+]
+
+
+def country_names():
+    return [name for name, _ in COUNTRIES]
+
+
+def dial_labels():
+    return [f"{name} ({code})" for name, code in COUNTRIES]
+
+
+def label_for_code(code):
+    for name, c in COUNTRIES:
+        if c == code:
+            return f"{name} ({c})"
+    return code
+
+
+def code_from_label(label):
+    label = (label or "").strip()
+    if label.endswith(")") and "(" in label:
+        return label[label.rindex("(") + 1:-1].strip()
+    return label
+
+
 TAX_FREE_ALLOWANCE = 12_570
 BASIC_RATE_LIMIT   = 50_270
 HIGHER_RATE_LIMIT  = 125_140
