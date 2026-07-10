@@ -8,10 +8,9 @@ import threading
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import sys
-import os
 import math
+import platform_support as plat
 
-import pystray
 from PIL import Image, ImageDraw
 
 try:
@@ -1394,7 +1393,7 @@ class GenerateInvoiceDialog(tk.Toplevel):
         self.db.save_invoice(pdf_data["invoice_number"], client,
                              start, end, total, out_path, line_items)
         try:
-            os.startfile(str(out_path))
+            plat.open_file(out_path)
         except Exception:
             pass
 
@@ -2124,7 +2123,7 @@ class TimeTrackrApp:
 
         self._entry_id  = None
         self._main_win  = None
-        self._tray      = None
+        self.tray       = None
 
         # Recover open entry from last session
         entry = self.db.open_entry()
@@ -2136,33 +2135,21 @@ class TimeTrackrApp:
     # ── Tray ──────────────────────────────────────────────────────────────────
 
     def _setup_tray(self):
-        menu = pystray.Menu(
-            pystray.MenuItem("Open Dashboard", lambda *_: self.root.after(0, self.show_dashboard), default=True),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(
-                "Start Tracking",
-                lambda *_: self.root.after(0, self.show_start),
-                enabled=lambda _: self._entry_id is None,
-            ),
-            pystray.MenuItem(
-                "Stop Tracking",
-                lambda *_: self.root.after(0, self.do_stop),
-                enabled=lambda _: self._entry_id is not None,
-            ),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Quit", lambda *_: self.root.after(0, self._quit)),
-        )
-        self._tray = pystray.Icon(
-            APP_NAME,
-            make_tray_icon(self._entry_id is not None),
-            APP_NAME,
-            menu,
-        )
-        threading.Thread(target=self._tray.run, daemon=True).start()
+        menu = [
+            plat.MenuItem("Open Dashboard", self.show_dashboard, default=True),
+            plat.SEPARATOR,
+            plat.MenuItem("Start Tracking", self.show_start,
+                          enabled_when=lambda: self._entry_id is None),
+            plat.MenuItem("Stop Tracking", self.do_stop,
+                          enabled_when=lambda: self._entry_id is not None),
+            plat.SEPARATOR,
+            plat.MenuItem("Quit", self._quit),
+        ]
+        self.tray = plat.make_tray(
+            APP_NAME, menu, lambda: make_tray_icon(self._entry_id is not None))
 
     def _update_tray(self):
-        if self._tray:
-            self._tray.icon = make_tray_icon(self._entry_id is not None)
+        self.tray.update_icon()
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
@@ -2207,12 +2194,10 @@ class TimeTrackrApp:
             ):
                 return
             self.db.stop_entry(self._entry_id)
-        if self._tray:
-            self._tray.stop()
-        self.root.quit()
+        self.tray.stop()
 
     def run(self):
-        self.root.mainloop()
+        self.tray.run(self.root)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
