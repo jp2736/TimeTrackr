@@ -1144,14 +1144,7 @@ class EditEntryDialog(tk.Toplevel):
 # ── Invoice Settings Dialog ───────────────────────────────────────────────────
 
 class InvoiceSettingsDialog(tk.Toplevel):
-    _TABS = [
-        (" Business ", [
-            ("Business Name",  "biz_name"),
-            ("Contact Name",   "biz_contact"),
-            ("Address",        "biz_address"),
-            ("Email",          "biz_email"),
-            ("Phone",          "biz_phone"),
-        ]),
+    _GENERIC_TABS = [
         (" Bank Details ", [
             ("Account Name",   "bank_account_name"),
             ("Bank Name",      "bank_name"),
@@ -1172,6 +1165,19 @@ class InvoiceSettingsDialog(tk.Toplevel):
         "invoice_prefix": "INV-",
         "payment_terms": "Payment due within 30 days",
     }
+    # Business text fields: (label, settings key, placeholder example)
+    _BIZ_FIELDS = [
+        ("Business Name", "biz_name",       "Acme Consulting Ltd"),
+        ("Contact Name",  "biz_contact",    "Jane Smith"),
+        ("Address Line 1", "biz_addr_line1", "123 Example St"),
+        ("Address Line 2", "biz_addr_line2", "Suite 4"),
+        ("City",          "biz_city",       "London"),
+        ("State/County",  "biz_county",     "Greater London"),
+        ("Postcode/ZIP",  "biz_postcode",   "SW1A 1AA"),
+        ("Email",         "biz_email",      "you@example.com"),
+    ]
+    _ADDR_KEYS = ["biz_addr_line1", "biz_addr_line2", "biz_city",
+                  "biz_county", "biz_postcode", "biz_country"]
 
     def __init__(self, parent, db):
         super().__init__(parent)
@@ -1179,7 +1185,8 @@ class InvoiceSettingsDialog(tk.Toplevel):
         self.title("Invoice Settings")
         self.resizable(False, False)
         self.grab_set()
-        self._vars = {}
+        self._vars = {}          # generic StringVars (bank/defaults)
+        self._biz_entries = {}   # key -> PlaceholderEntry
         self._build()
         cx = parent.winfo_screenwidth()  // 2 - 230
         cy = parent.winfo_screenheight() // 2 - 200
@@ -1189,7 +1196,49 @@ class InvoiceSettingsDialog(tk.Toplevel):
     def _build(self):
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=12, pady=8)
-        for tab_label, fields in self._TABS:
+
+        # ── Business tab (custom) ──
+        bf = tk.Frame(nb, padx=16, pady=10)
+        nb.add(bf, text=" Business ")
+        for row, (label, key, ph) in enumerate(self._BIZ_FIELDS):
+            tk.Label(bf, text=label + ":", anchor="w", width=16).grid(
+                row=row, column=0, sticky="w", pady=4)
+            entry = PlaceholderEntry(bf, placeholder=ph, width=30)
+            entry.grid(row=row, column=1, sticky="w", pady=4, padx=(4, 0), columnspan=2)
+            existing = self.db.get_setting(key)
+            if existing:
+                entry.set_value(existing)
+            self._biz_entries[key] = entry
+
+        # Country combobox (editable, defaults to United Kingdom)
+        crow = len(self._BIZ_FIELDS)
+        tk.Label(bf, text="Country:", anchor="w", width=16).grid(
+            row=crow, column=0, sticky="w", pady=4)
+        self._country_var = tk.StringVar(
+            value=self.db.get_setting("biz_country") or "United Kingdom")
+        ttk.Combobox(bf, textvariable=self._country_var, values=country_names(),
+                     width=28).grid(row=crow, column=1, sticky="w", pady=4,
+                                    padx=(4, 0), columnspan=2)
+
+        # Phone: dial-code combobox + number
+        prow = crow + 1
+        tk.Label(bf, text="Phone:", anchor="w", width=16).grid(
+            row=prow, column=0, sticky="w", pady=4)
+        self._phone_code_var = tk.StringVar(
+            value=label_for_code(self.db.get_setting("biz_phone_code") or "+44"))
+        ttk.Combobox(bf, textvariable=self._phone_code_var, values=dial_labels(),
+                     state="readonly", width=18).grid(row=prow, column=1,
+                                                      sticky="w", pady=4, padx=(4, 0))
+        self._phone_entry = PlaceholderEntry(bf, placeholder="7700 900123", width=14)
+        self._phone_entry.grid(row=prow, column=2, sticky="w", pady=4, padx=(4, 0))
+        existing_num = self.db.get_setting("biz_phone_number")
+        if existing_num:
+            self._phone_entry.set_value(existing_num)
+
+        self._migrate_legacy()
+
+        # ── Generic tabs ──
+        for tab_label, fields in self._GENERIC_TABS:
             f = tk.Frame(nb, padx=16, pady=10)
             nb.add(f, text=tab_label)
             for row, (label, key) in enumerate(fields):
@@ -1199,13 +1248,31 @@ class InvoiceSettingsDialog(tk.Toplevel):
                 var = tk.StringVar(value=default)
                 self._vars[key] = var
                 tk.Entry(f, textvariable=var, width=30).grid(
-                    row=row, column=1, sticky="w", pady=4, padx=(4,0))
-        bf = tk.Frame(self)
-        bf.pack(fill="x", padx=12, pady=(0,12))
-        ttk.Button(bf, text="Save",   command=self._save).pack(side="right", padx=4)
-        ttk.Button(bf, text="Cancel", command=self.destroy).pack(side="right", padx=4)
+                    row=row, column=1, sticky="w", pady=4, padx=(4, 0))
+
+        bar = tk.Frame(self)
+        bar.pack(fill="x", padx=12, pady=(0, 12))
+        ttk.Button(bar, text="Save",   command=self._save).pack(side="right", padx=4)
+        ttk.Button(bar, text="Cancel", command=self.destroy).pack(side="right", padx=4)
+
+    def _migrate_legacy(self):
+        """One-time convenience: seed new fields from legacy single-blob settings."""
+        structured = any(self.db.get_setting(k) for k in self._ADDR_KEYS)
+        legacy_addr = self.db.get_setting("biz_address")
+        if not structured and legacy_addr:
+            self._biz_entries["biz_addr_line1"].set_value(
+                ", ".join(part.strip() for part in legacy_addr.splitlines() if part.strip()))
+        if not self.db.get_setting("biz_phone_number"):
+            legacy_phone = self.db.get_setting("biz_phone")
+            if legacy_phone:
+                self._phone_entry.set_value(legacy_phone)
 
     def _save(self):
+        for key, entry in self._biz_entries.items():
+            self.db.set_setting(key, entry.get_value().strip())
+        self.db.set_setting("biz_country", self._country_var.get().strip())
+        self.db.set_setting("biz_phone_code", code_from_label(self._phone_code_var.get()))
+        self.db.set_setting("biz_phone_number", self._phone_entry.get_value().strip())
         for key, var in self._vars.items():
             self.db.set_setting(key, var.get().strip())
         self.destroy()
