@@ -37,12 +37,14 @@ class MenuItem:
     enabled_when: zero-arg callable -> bool; re-evaluated to grey the item (None = always on)
     default:      True marks the primary (left-click / double-click) action
     """
-    def __init__(self, label, action=None, enabled_when=None, default=False, separator=False):
+    def __init__(self, label, action=None, enabled_when=None, default=False,
+                 separator=False, visible_when=None):
         self.label = label
         self.action = action
         self.enabled_when = enabled_when
         self.default = default
         self.separator = separator
+        self.visible_when = visible_when
 
 
 SEPARATOR = MenuItem(None, separator=True)
@@ -73,6 +75,11 @@ class _PystrayTray:
             return True
         return lambda _i: item.enabled_when()
 
+    def _visible(self, item):
+        if item.visible_when is None:
+            return True
+        return lambda _i: item.visible_when()
+
     def _build_menu(self):
         import pystray
         entries = []
@@ -82,7 +89,8 @@ class _PystrayTray:
             else:
                 entries.append(pystray.MenuItem(
                     it.label, self._wrap(it.action),
-                    default=it.default, enabled=self._enabled(it)))
+                    default=it.default, enabled=self._enabled(it),
+                    visible=self._visible(it)))
         return pystray.Menu(*entries)
 
     def update_icon(self):
@@ -130,6 +138,14 @@ def _mac_menu_handler_class():
                 return True
             return bool(it.enabled_when())
 
+        def menuNeedsUpdate_(self, menu):
+            for idx, it in enumerate(self.items):
+                if it.separator or it.visible_when is None:
+                    continue
+                mi = self.menu_items.get(idx)
+                if mi is not None:
+                    mi.setHidden_(not it.visible_when())
+
     return _MacMenuHandler
 
 
@@ -174,9 +190,11 @@ class _MacTray:
         self._handler = _mac_menu_handler_class().alloc().init()
         self._handler.items = self._items
         self._handler.root = tk_root
+        self._handler.menu_items = {}
 
         menu = NSMenu.alloc().init()
         menu.setAutoenablesItems_(True)  # consult validateMenuItem_ for enabled state
+        menu.setDelegate_(self._handler)  # consult menuNeedsUpdate_ for hidden state
         # note: MenuItem.default is intentionally unused on macOS — clicking the status item opens the menu
         for idx, it in enumerate(self._items):
             if it.separator:
@@ -187,6 +205,7 @@ class _MacTray:
             mi.setTarget_(self._handler)
             mi.setTag_(idx)
             menu.addItem_(mi)
+            self._handler.menu_items[idx] = mi
         self._status_item.setMenu_(menu)
 
         self._apply_icon()
