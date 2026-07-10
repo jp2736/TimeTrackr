@@ -51,6 +51,23 @@ def test_compose_phone_blank_number():
     assert main.compose_phone("+44", "  ") == ""
 
 
+def test_compose_business_address_structured():
+    parts = ["123 Example St", "", "London", "", "SW1A 1AA"]
+    assert main.compose_business_address(parts, "United Kingdom", "legacy blob") \
+        == "123 Example St, London, SW1A 1AA, United Kingdom"
+
+
+def test_compose_business_address_default_country_does_not_mask_legacy():
+    # all address lines empty, country defaulted -> legacy must still win
+    assert main.compose_business_address(["", "", "", "", ""], "United Kingdom",
+                                         "12 Old Road, London EC1A 1AA") \
+        == "12 Old Road, London EC1A 1AA"
+
+
+def test_compose_business_address_empty_everything():
+    assert main.compose_business_address(["", "", "", "", ""], "", "") == ""
+
+
 def test_resolve_project_job_selected_wins():
     assert main.resolve_project_job(5, [1, 2, 3]) == ("use", 5)
 

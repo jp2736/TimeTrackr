@@ -81,6 +81,19 @@ def compose_phone(code, number):
     return f"{(code or '').strip()} {number}".strip()
 
 
+def compose_business_address(line_parts, country, legacy):
+    """Business address for the PDF.
+
+    Use the structured lines (plus country) only when at least one address
+    line/locality field is set; otherwise fall back to the legacy single-blob
+    address. A defaulted country alone must NOT mask an empty address.
+    line_parts: [line1, line2, city, county, postcode] (country excluded).
+    """
+    if compose_address(line_parts):
+        return compose_address(list(line_parts) + [country])
+    return (legacy or "").strip()
+
+
 def resolve_project_job(selected_job_id, job_ids):
     """Decide which job a new project attaches to when + Project is pressed.
 
@@ -1177,7 +1190,7 @@ class InvoiceSettingsDialog(tk.Toplevel):
         ("Email",         "biz_email",      "you@example.com"),
     ]
     _ADDR_KEYS = ["biz_addr_line1", "biz_addr_line2", "biz_city",
-                  "biz_county", "biz_postcode", "biz_country"]
+                  "biz_county", "biz_postcode"]
 
     def __init__(self, parent, db):
         super().__init__(parent)
@@ -1580,11 +1593,13 @@ class GenerateInvoiceDialog(tk.Toplevel):
         total      = subtotal + tax_amount
         start, end = self._get_date_range()
 
-        biz_addr = compose_address(
+        biz_addr = compose_business_address(
             [self.db.get_setting(k, "") for k in
              ("biz_addr_line1", "biz_addr_line2", "biz_city",
-              "biz_county", "biz_postcode", "biz_country")]
-        ) or self.db.get_setting("biz_address", "")
+              "biz_county", "biz_postcode")],
+            self.db.get_setting("biz_country", ""),
+            self.db.get_setting("biz_address", ""),
+        )
         biz_phone = compose_phone(
             self.db.get_setting("biz_phone_code", ""),
             self.db.get_setting("biz_phone_number", ""),
