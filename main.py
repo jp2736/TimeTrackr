@@ -1354,17 +1354,31 @@ class GenerateInvoiceDialog(tk.Toplevel):
         mid.pack(fill="x", padx=12, pady=4)
 
         client_lf = tk.LabelFrame(mid, text=" Bill To ", padx=8, pady=6)
-        client_lf.pack(side="left", fill="both", expand=True, padx=(0,4))
+        client_lf.pack(side="left", fill="both", expand=True, padx=(0, 4))
 
-        tk.Label(client_lf, text="Name:", anchor="w").grid(row=0, column=0, sticky="w", pady=2)
-        self._client_name = tk.StringVar()
-        tk.Entry(client_lf, textvariable=self._client_name, width=26).grid(
-            row=0, column=1, sticky="w", pady=2, padx=(4,0))
+        self._client_name = PlaceholderEntry(client_lf, placeholder="Client Ltd", width=26)
+        self._client_fields = {}
+        client_rows = [
+            ("Name",         self._client_name),
+            ("Address 1",    PlaceholderEntry(client_lf, placeholder="123 Example St", width=26)),
+            ("Address 2",    PlaceholderEntry(client_lf, placeholder="Suite 4", width=26)),
+            ("City",         PlaceholderEntry(client_lf, placeholder="London", width=26)),
+            ("State/County", PlaceholderEntry(client_lf, placeholder="Greater London", width=26)),
+            ("Postcode/ZIP", PlaceholderEntry(client_lf, placeholder="SW1A 1AA", width=26)),
+        ]
+        for row, (label, widget) in enumerate(client_rows):
+            tk.Label(client_lf, text=label + ":", anchor="w").grid(
+                row=row, column=0, sticky="w", pady=2)
+            widget.grid(row=row, column=1, sticky="w", pady=2, padx=(4, 0))
+            if label != "Name":
+                self._client_fields[label] = widget
 
-        tk.Label(client_lf, text="Address:", anchor="w").grid(row=1, column=0, sticky="nw", pady=2)
-        self._client_addr = tk.Text(client_lf, width=26, height=4,
-                                     font=("Segoe UI", 9), relief="sunken", bd=1)
-        self._client_addr.grid(row=1, column=1, sticky="w", pady=2, padx=(4,0))
+        tk.Label(client_lf, text="Country:", anchor="w").grid(
+            row=len(client_rows), column=0, sticky="w", pady=2)
+        self._client_country = tk.StringVar(value="United Kingdom")
+        ttk.Combobox(client_lf, textvariable=self._client_country,
+                     values=country_names(), width=24).grid(
+            row=len(client_rows), column=1, sticky="w", pady=2, padx=(4, 0))
 
         inv_lf = tk.LabelFrame(mid, text=" Invoice Details ", padx=8, pady=6)
         inv_lf.pack(side="left", fill="both", expand=True)
@@ -1536,7 +1550,7 @@ class GenerateInvoiceDialog(tk.Toplevel):
                 "  .venv\\Scripts\\pip install reportlab",
                 parent=self)
             return
-        client = self._client_name.get().strip()
+        client = self._client_name.get_value().strip()
         if not client:
             messagebox.showwarning("Missing", "Please enter a client name.", parent=self)
             return
@@ -1566,11 +1580,30 @@ class GenerateInvoiceDialog(tk.Toplevel):
         total      = subtotal + tax_amount
         start, end = self._get_date_range()
 
+        biz_addr = compose_address(
+            [self.db.get_setting(k, "") for k in
+             ("biz_addr_line1", "biz_addr_line2", "biz_city",
+              "biz_county", "biz_postcode", "biz_country")]
+        ) or self.db.get_setting("biz_address", "")
+        biz_phone = compose_phone(
+            self.db.get_setting("biz_phone_code", ""),
+            self.db.get_setting("biz_phone_number", ""),
+        ) or self.db.get_setting("biz_phone", "")
+        client_addr = compose_address(
+            [self._client_fields["Address 1"].get_value(),
+             self._client_fields["Address 2"].get_value(),
+             self._client_fields["City"].get_value(),
+             self._client_fields["State/County"].get_value(),
+             self._client_fields["Postcode/ZIP"].get_value(),
+             self._client_country.get()],
+            sep="\n",
+        )
+
         pdf_data = {
             "biz_name":            self.db.get_setting("biz_name",""),
-            "biz_address":         self.db.get_setting("biz_address",""),
+            "biz_address":         biz_addr,
             "biz_email":           self.db.get_setting("biz_email",""),
-            "biz_phone":           self.db.get_setting("biz_phone",""),
+            "biz_phone":           biz_phone,
             "bank_account_name":   self.db.get_setting("bank_account_name",""),
             "bank_name":           self.db.get_setting("bank_name",""),
             "bank_account_number": self.db.get_setting("bank_account_number",""),
@@ -1579,7 +1612,7 @@ class GenerateInvoiceDialog(tk.Toplevel):
             "bank_bic":            self.db.get_setting("bank_bic",""),
             "currency":            cur,
             "client_name":         client,
-            "client_address":      self._client_addr.get("1.0", tk.END).strip(),
+            "client_address":      client_addr,
             "invoice_number":      self._inv_vars["Invoice #"].get().strip(),
             "issue_date":          self._inv_vars["Issue Date"].get().strip(),
             "due_date":            self._inv_vars["Due Date"].get().strip(),
