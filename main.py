@@ -69,6 +69,33 @@ def code_from_label(label):
     return label
 
 
+def compose_address(parts, sep=", "):
+    """Join non-empty address parts (line1, line2, city, county, postcode, country)."""
+    return sep.join(p.strip() for p in parts if p and p.strip())
+
+
+def compose_phone(code, number):
+    number = (number or "").strip()
+    if not number:
+        return ""
+    return f"{(code or '').strip()} {number}".strip()
+
+
+def resolve_project_job(selected_job_id, job_ids):
+    """Decide which job a new project attaches to when + Project is pressed.
+
+    Returns ("use", job_id) to proceed, ("choose", None) to prompt the user,
+    or ("empty", None) when no jobs exist.
+    """
+    if selected_job_id is not None:
+        return ("use", selected_job_id)
+    if not job_ids:
+        return ("empty", None)
+    if len(job_ids) == 1:
+        return ("use", job_ids[0])
+    return ("choose", None)
+
+
 TAX_FREE_ALLOWANCE = 12_570
 BASIC_RATE_LIMIT   = 50_270
 HIGHER_RATE_LIMIT  = 125_140
