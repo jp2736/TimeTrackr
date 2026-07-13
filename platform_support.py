@@ -118,17 +118,47 @@ def _mac_menu_handler_class():
 
     class _MacMenuHandler(NSObject):
         # `items` (list[MenuItem]) and `root` (Tk root) are assigned after alloc/init.
+        #
+        # CRITICAL: do NOT touch Tk from menuAction_. It fires inside Cocoa's menu-
+        # tracking run loop; calling into Tcl/Tk from that context (even root.after,
+        # even performSelector:afterDelay:0, even NSOperationQueue.mainQueue()) can
+        # still land while tracking is tearing down and corrupts the interpreter
+        # thread state, aborting the process with
+        # "PyEval_RestoreThread ... thread state is NULL".
+        #
+        # Fix: menuAction_ only records which item was chosen (self._pending). The
+        # actual Tk-touching action runs from menuDidClose_, the NSMenu delegate's
+        # authoritative "tracking has fully ended" callback. Even menuDidClose_ can
+        # fire during the tail end of tracking teardown, so we do one more principled
+        # hop to the *next* default-mode run loop turn via a zero-interval NSTimer
+        # scheduled in NSDefaultRunLoopMode — by the time that timer fires, Cocoa has
+        # exited menu-tracking mode and it's safe to build heavy Tk windows.
         def menuAction_(self, sender):
-            # CRITICAL: do NOT touch Tk here. menuAction_ fires inside Cocoa's menu-
-            # tracking run loop; calling into Tcl/Tk from that context (even root.after)
-            # corrupts the interpreter thread state and aborts the process with
-            # "PyEval_RestoreThread ... thread state is NULL". Instead defer via the
-            # Cocoa run loop: performSelector:afterDelay:0 runs runAction_ on the main
-            # thread once the menu has closed, where Tk calls are safe.
-            self.performSelector_withObject_afterDelay_("runAction:", sender, 0.0)
+            self._pending = sender.tag()
 
-        def runAction_(self, sender):
-            it = self.items[sender.tag()]
+        def menuDidClose_(self, menu):
+            if getattr(self, "_pending", None) is None:
+                return
+            # Snapshot and clear immediately so rapid re-selection / re-entrancy
+            # can't run the same action twice or run a stale one.
+            tag = self._pending
+            self._pending = None
+
+            from Foundation import NSTimer, NSRunLoop, NSDefaultRunLoopMode
+
+            # Carry the tag via userInfo (an NSNumber round-trips fine through the
+            # PyObjC bridge) rather than keying a side-dict by id(timer): the timer
+            # object handed back to _fireTimer_ can be a distinct Python-side proxy
+            # for the same underlying NSTimer, so id() is not a reliable key.
+            timer = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+                0.0, self, "_fireTimer:", tag, False)
+            NSRunLoop.currentRunLoop().addTimer_forMode_(timer, NSDefaultRunLoopMode)
+
+        def _fireTimer_(self, timer):
+            self._run_tag(timer.userInfo())
+
+        def _run_tag(self, tag):
+            it = self.items[tag]
             if it.action is not None:
                 it.action()
 
@@ -191,6 +221,7 @@ class _MacTray:
         self._handler.items = self._items
         self._handler.root = tk_root
         self._handler.menu_items = {}
+        self._handler._pending = None
 
         menu = NSMenu.alloc().init()
         menu.setAutoenablesItems_(True)  # consult validateMenuItem_ for enabled state
