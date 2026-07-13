@@ -50,6 +50,27 @@ TimeTrackr appears as a clock icon in the macOS menu bar (top-right). Right-clic
 for Start/Stop tracking and the dashboard. Data lives in `~/.timetrackr/data.db`, identical
 to Windows.
 
+### Run it as a Mac app (Launchpad / Spotlight / start at login)
+
+If you have [uv](https://docs.astral.sh/uv/) installed, you can install a thin
+`TimeTrackr.app` that launches this repo and manages its own environment:
+
+```bash
+./macos/install_mac_app.sh            # build + install to /Applications + add login item
+./macos/install_mac_app.sh --no-login # ...without the start-at-login item
+```
+
+This builds a small app bundle whose launcher runs `uv run main.py` (uv creates
+and syncs the `.venv` from `pyproject.toml` on first launch), installs it to
+`/Applications` (or `~/Applications` if that isn't writable), and registers it as
+a Login Item so it starts automatically. Launch it from Launchpad or Spotlight.
+
+The bundle is a **thin wrapper** — it points at this repo by absolute path, so it
+picks up code changes automatically but stops working if you move or delete the
+repo. Re-run the script after moving the repo. Manage or remove the login item
+under **System Settings → General → Login Items**. First run may ask to allow
+System Events automation (for the login item) and to confirm opening the app.
+
 ## Usage
 
 Once started, TimeTrackr runs silently in the system tray (bottom-right corner of the taskbar). You won't see a window or taskbar button — look for the clock icon in the tray. Right-click it to start/stop tracking or open the dashboard. Closing the dashboard window returns the app to the tray; it keeps running in the background.
