@@ -132,45 +132,38 @@ def _mac_menu_handler_class():
     class _MacMenuHandler(NSObject):
         # `items` (list[MenuItem]) and `root` (Tk root) are assigned after alloc/init.
         #
-        # CRITICAL: do NOT touch Tk from menuAction_. It fires inside Cocoa's menu-
-        # tracking run loop; calling into Tcl/Tk from that context (even root.after,
-        # even performSelector:afterDelay:0, even NSOperationQueue.mainQueue()) can
-        # still land while tracking is tearing down and corrupts the interpreter
-        # thread state, aborting the process with
-        # "PyEval_RestoreThread ... thread state is NULL".
+        # Running a menu item's action is split across three steps to stay safe AND
+        # correct on macOS. Two hard constraints drive this:
         #
-        # Fix: menuAction_ only records which item was chosen (self._pending). The
-        # actual Tk-touching action runs from menuDidClose_, the NSMenu delegate's
-        # authoritative "tracking has fully ended" callback. Even menuDidClose_ can
-        # fire during the tail end of tracking teardown, so we do one more principled
-        # hop to the *next* default-mode run loop turn via a zero-interval NSTimer
-        # scheduled in NSDefaultRunLoopMode — by the time that timer fires, Cocoa has
-        # exited menu-tracking mode and it's safe to build heavy Tk windows.
+        #  (1) SAFETY: the action must NOT run inside Cocoa's menu-tracking run loop.
+        #      Building/rendering a heavy Tk window there corrupts the interpreter and
+        #      aborts with "PyEval_RestoreThread ... thread state is NULL". Deferring
+        #      via root.after / performSelector:afterDelay:0 / NSOperationQueue /
+        #      AppHelper / a CFRunLoopObserver all still fire too early and stay flaky.
+        #      What works reliably: a zero-interval NSTimer registered ONLY in
+        #      NSDefaultRunLoopMode and scheduled from menuDidClose_ (the menu is fully
+        #      gone by then). It fires on the next default-mode turn — safe.
+        #
+        #  (2) CORRECTNESS: menuDidClose_ can fire BEFORE menuAction_ delivers the
+        #      chosen item, so menuDidClose_ does not yet know the tag. Therefore the
+        #      timer must read the pending tag at FIRE time, not at schedule time —
+        #      by which point menuAction_ has recorded it (works in either firing
+        #      order). Baking the tag in at menuDidClose_ time runs the *previous*
+        #      selection (an off-by-one).
         def menuAction_(self, sender):
             self._pending = sender.tag()
 
         def menuDidClose_(self, menu):
-            if getattr(self, "_pending", None) is None:
-                return
-            # Snapshot and clear immediately so rapid re-selection / re-entrancy
-            # can't run the same action twice or run a stale one.
-            tag = self._pending
-            self._pending = None
-
             from Foundation import NSTimer, NSRunLoop, NSDefaultRunLoopMode
-
-            # Carry the tag via userInfo (an NSNumber round-trips fine through the
-            # PyObjC bridge) rather than keying a side-dict by id(timer): the timer
-            # object handed back to _fireTimer_ can be a distinct Python-side proxy
-            # for the same underlying NSTimer, so id() is not a reliable key.
             timer = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
-                0.0, self, "_fireTimer:", tag, False)
+                0.0, self, "_fireTimer:", None, False)
             NSRunLoop.currentRunLoop().addTimer_forMode_(timer, NSDefaultRunLoopMode)
 
         def _fireTimer_(self, timer):
-            self._run_tag(timer.userInfo())
-
-        def _run_tag(self, tag):
+            tag = self._pending
+            self._pending = None
+            if tag is None:
+                return
             it = self.items[tag]
             if it.action is not None:
                 it.action()
