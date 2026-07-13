@@ -18,6 +18,19 @@ IS_MAC = sys.platform == "darwin"
 IS_WINDOWS = sys.platform.startswith("win")
 
 
+def activate_app():
+    """Bring this app to the foreground so a just-shown Tk window becomes key.
+
+    macOS menu-bar (accessory) apps do not auto-activate when a window is shown,
+    so the window opens non-key: the first click on it is consumed just activating
+    the window, and window controls (including the red close button) don't respond
+    until the app is active. Explicitly activating fixes both. No-op elsewhere.
+    """
+    if IS_MAC:
+        from AppKit import NSApplication
+        NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+
+
 def open_file(path):
     """Open a file with the OS default handler. Raises on failure."""
     path = str(path)

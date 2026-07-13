@@ -2446,11 +2446,14 @@ class TimeTrackrApp:
     def show_dashboard(self):
         if self._main_win and self._main_win.winfo_exists():
             self._main_win.deiconify()
-            self._main_win.lift()
-            self._main_win.focus_force()
-            return
-        self._main_win = MainWindow(self.root, self.db, self)
-        self._main_win.protocol("WM_DELETE_WINDOW", self._main_win.withdraw)
+        else:
+            self._main_win = MainWindow(self.root, self.db, self)
+            self._main_win.protocol("WM_DELETE_WINDOW", self._main_win.withdraw)
+        # Activate first so the window becomes key on macOS (accessory app),
+        # otherwise its buttons and close control swallow the first click.
+        plat.activate_app()
+        self._main_win.lift()
+        self._main_win.focus_force()
 
     def show_start(self):
         if self._entry_id is not None:
