@@ -2407,6 +2407,14 @@ class TimeTrackrApp:
         self.db   = Database()
         self.root = tk.Tk()
         self.root.withdraw()
+        # The root only hosts the Tk interpreter; it is never meant to be seen.
+        # A messagebox with parent=self.root (e.g. the quit-while-tracking prompt)
+        # forces its parent window to surface on macOS, flashing the empty root as
+        # a stray blank window. Making the root fully transparent and off-screen
+        # keeps it invisible even when a dialog surfaces it. (-alpha is a no-op on
+        # platforms that don't support it, so this stays cross-platform-safe.)
+        self.root.geometry("1x1-10000-10000")
+        self.root.attributes("-alpha", 0.0)
 
         self._entry_id  = None
         self._main_win  = None
