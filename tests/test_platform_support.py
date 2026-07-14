@@ -40,3 +40,28 @@ def test_make_tray_returns_controller_with_api():
     assert hasattr(tray, "run") and hasattr(tray, "update_icon") and hasattr(tray, "stop")
     expected = plat._MacTray if plat.IS_MAC else plat._PystrayTray
     assert isinstance(tray, expected)
+
+
+def test_menuitem_visible_when_defaults_to_none():
+    it = plat.MenuItem("X", lambda: None)
+    assert it.visible_when is None
+
+
+def test_menuitem_stores_visible_when():
+    flag = {"v": True}
+    it = plat.MenuItem("X", lambda: None, visible_when=lambda: flag["v"])
+    assert it.visible_when() is True
+    flag["v"] = False
+    assert it.visible_when() is False
+
+
+def test_pystray_visible_wraps_none_as_true():
+    tray = plat._PystrayTray("App", [], lambda: None)
+    assert tray._visible(plat.MenuItem("X", lambda: None)) is True
+
+
+def test_pystray_visible_wraps_callable():
+    tray = plat._PystrayTray("App", [], lambda: None)
+    cond = tray._visible(plat.MenuItem("Y", lambda: None, visible_when=lambda: False))
+    assert callable(cond)
+    assert cond(None) is False

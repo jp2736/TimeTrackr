@@ -30,6 +30,85 @@ JOB_COLORS = [
     "#9C27B0", "#00BCD4", "#795548", "#607D8B",
 ]
 
+# ── Country / dialling-code reference ─────────────────────────────────────────
+# (name, dial_code). Curated common set; the country combobox is editable so
+# anything not listed can still be typed. Plain text only — flag emoji do not
+# render in Tkinter comboboxes on Windows.
+COUNTRIES = [
+    ("United Kingdom", "+44"), ("United States", "+1"), ("Ireland", "+353"),
+    ("Canada", "+1"), ("Australia", "+61"), ("New Zealand", "+64"),
+    ("Germany", "+49"), ("France", "+33"), ("Spain", "+34"), ("Italy", "+39"),
+    ("Netherlands", "+31"), ("Belgium", "+32"), ("Switzerland", "+41"),
+    ("Austria", "+43"), ("Sweden", "+46"), ("Norway", "+47"), ("Denmark", "+45"),
+    ("Finland", "+358"), ("Portugal", "+351"), ("Poland", "+48"),
+    ("Czech Republic", "+420"), ("India", "+91"), ("Singapore", "+65"),
+    ("Hong Kong", "+852"), ("Japan", "+81"), ("South Africa", "+27"),
+    ("United Arab Emirates", "+971"), ("Brazil", "+55"), ("Mexico", "+52"),
+]
+
+
+def country_names():
+    return [name for name, _ in COUNTRIES]
+
+
+def dial_labels():
+    return [f"{name} ({code})" for name, code in COUNTRIES]
+
+
+def label_for_code(code):
+    for name, c in COUNTRIES:
+        if c == code:
+            return f"{name} ({c})"
+    return code
+
+
+def code_from_label(label):
+    label = (label or "").strip()
+    if label.endswith(")") and "(" in label:
+        return label[label.rindex("(") + 1:-1].strip()
+    return label
+
+
+def compose_address(parts, sep=", "):
+    """Join non-empty address parts (line1, line2, city, county, postcode, country)."""
+    return sep.join(p.strip() for p in parts if p and p.strip())
+
+
+def compose_phone(code, number):
+    number = (number or "").strip()
+    if not number:
+        return ""
+    return f"{(code or '').strip()} {number}".strip()
+
+
+def compose_business_address(line_parts, country, legacy):
+    """Business address for the PDF.
+
+    Use the structured lines (plus country) only when at least one address
+    line/locality field is set; otherwise fall back to the legacy single-blob
+    address. A defaulted country alone must NOT mask an empty address.
+    line_parts: [line1, line2, city, county, postcode] (country excluded).
+    """
+    if compose_address(line_parts):
+        return compose_address(list(line_parts) + [country])
+    return (legacy or "").strip()
+
+
+def resolve_project_job(selected_job_id, job_ids):
+    """Decide which job a new project attaches to when + Project is pressed.
+
+    Returns ("use", job_id) to proceed, ("choose", None) to prompt the user,
+    or ("empty", None) when no jobs exist.
+    """
+    if selected_job_id is not None:
+        return ("use", selected_job_id)
+    if not job_ids:
+        return ("empty", None)
+    if len(job_ids) == 1:
+        return ("use", job_ids[0])
+    return ("choose", None)
+
+
 TAX_FREE_ALLOWANCE = 12_570
 BASIC_RATE_LIMIT   = 50_270
 HIGHER_RATE_LIMIT  = 125_140
@@ -435,6 +514,52 @@ def make_tray_icon(tracking=False):
     return img
 
 
+class PlaceholderEntry(tk.Entry):
+    """Entry that shows greyed example text when empty and unfocused.
+
+    get_value() returns "" while the placeholder is displayed so placeholder
+    text never leaks into saved settings or a generated PDF.
+    """
+
+    def __init__(self, master, placeholder="", color="#9AA0A6", **kw):
+        super().__init__(master, **kw)
+        self._placeholder = placeholder
+        self._ph_color = color
+        self._default_fg = self.cget("fg")
+        self._is_placeholder = False
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
+        self._show_placeholder()
+
+    def _show_placeholder(self):
+        self.delete(0, tk.END)
+        self.insert(0, self._placeholder)
+        self.config(fg=self._ph_color)
+        self._is_placeholder = True
+
+    def _on_focus_in(self, _=None):
+        if self._is_placeholder:
+            self.delete(0, tk.END)
+            self.config(fg=self._default_fg)
+            self._is_placeholder = False
+
+    def _on_focus_out(self, _=None):
+        if not self.get():
+            self._show_placeholder()
+
+    def get_value(self):
+        return "" if self._is_placeholder else self.get()
+
+    def set_value(self, text):
+        if text:
+            self.config(fg=self._default_fg)
+            self._is_placeholder = False
+            self.delete(0, tk.END)
+            self.insert(0, text)
+        else:
+            self._show_placeholder()
+
+
 def ask_string(parent, title, prompt, initial=""):
     dlg = tk.Toplevel(parent)
     dlg.title(title)
@@ -464,6 +589,41 @@ def ask_string(parent, title, prompt, initial=""):
     dlg.geometry("+%d+%d" % (parent.winfo_rootx() + 60, parent.winfo_rooty() + 60))
     parent.wait_window(dlg)
     return result[0]
+
+
+def ask_choice(parent, title, prompt, options):
+    """Modal single-choice picker. Returns the selected index, or None if cancelled."""
+    dlg = tk.Toplevel(parent)
+    dlg.title(title)
+    dlg.resizable(False, False)
+    dlg.grab_set()
+    result = {"idx": None}
+
+    f = tk.Frame(dlg, padx=16, pady=12)
+    f.pack()
+    tk.Label(f, text=prompt, anchor="w").pack(fill="x", pady=(0, 6))
+    var = tk.StringVar(value=options[0] if options else "")
+    cb = ttk.Combobox(f, textvariable=var, values=list(options),
+                      state="readonly", width=28)
+    cb.pack()
+    if options:
+        cb.current(0)
+
+    def ok(_=None):
+        result["idx"] = cb.current()
+        dlg.destroy()
+
+    bf = tk.Frame(f)
+    bf.pack(pady=(10, 0))
+    ttk.Button(bf, text="OK", command=ok).pack(side="left", padx=5)
+    ttk.Button(bf, text="Cancel", command=dlg.destroy).pack(side="left", padx=5)
+
+    cx = parent.winfo_screenwidth() // 2 - 160
+    cy = parent.winfo_screenheight() // 2 - 80
+    dlg.geometry(f"+{cx}+{cy}")
+    dlg.focus_force()
+    parent.wait_window(dlg)
+    return result["idx"]
 
 
 # ── Invoice PDF generator ─────────────────────────────────────────────────────
@@ -997,14 +1157,7 @@ class EditEntryDialog(tk.Toplevel):
 # ── Invoice Settings Dialog ───────────────────────────────────────────────────
 
 class InvoiceSettingsDialog(tk.Toplevel):
-    _TABS = [
-        (" Business ", [
-            ("Business Name",  "biz_name"),
-            ("Contact Name",   "biz_contact"),
-            ("Address",        "biz_address"),
-            ("Email",          "biz_email"),
-            ("Phone",          "biz_phone"),
-        ]),
+    _GENERIC_TABS = [
         (" Bank Details ", [
             ("Account Name",   "bank_account_name"),
             ("Bank Name",      "bank_name"),
@@ -1025,6 +1178,19 @@ class InvoiceSettingsDialog(tk.Toplevel):
         "invoice_prefix": "INV-",
         "payment_terms": "Payment due within 30 days",
     }
+    # Business text fields: (label, settings key, placeholder example)
+    _BIZ_FIELDS = [
+        ("Business Name", "biz_name",       "Acme Consulting Ltd"),
+        ("Contact Name",  "biz_contact",    "Jane Smith"),
+        ("Address Line 1", "biz_addr_line1", "123 Example St"),
+        ("Address Line 2", "biz_addr_line2", "Suite 4"),
+        ("City",          "biz_city",       "London"),
+        ("State/County",  "biz_county",     "Greater London"),
+        ("Postcode/ZIP",  "biz_postcode",   "SW1A 1AA"),
+        ("Email",         "biz_email",      "you@example.com"),
+    ]
+    _ADDR_KEYS = ["biz_addr_line1", "biz_addr_line2", "biz_city",
+                  "biz_county", "biz_postcode"]
 
     def __init__(self, parent, db):
         super().__init__(parent)
@@ -1032,7 +1198,8 @@ class InvoiceSettingsDialog(tk.Toplevel):
         self.title("Invoice Settings")
         self.resizable(False, False)
         self.grab_set()
-        self._vars = {}
+        self._vars = {}          # generic StringVars (bank/defaults)
+        self._biz_entries = {}   # key -> PlaceholderEntry
         self._build()
         cx = parent.winfo_screenwidth()  // 2 - 230
         cy = parent.winfo_screenheight() // 2 - 200
@@ -1042,7 +1209,49 @@ class InvoiceSettingsDialog(tk.Toplevel):
     def _build(self):
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=12, pady=8)
-        for tab_label, fields in self._TABS:
+
+        # ── Business tab (custom) ──
+        bf = tk.Frame(nb, padx=16, pady=10)
+        nb.add(bf, text=" Business ")
+        for row, (label, key, ph) in enumerate(self._BIZ_FIELDS):
+            tk.Label(bf, text=label + ":", anchor="w", width=16).grid(
+                row=row, column=0, sticky="w", pady=4)
+            entry = PlaceholderEntry(bf, placeholder=ph, width=30)
+            entry.grid(row=row, column=1, sticky="w", pady=4, padx=(4, 0), columnspan=2)
+            existing = self.db.get_setting(key)
+            if existing:
+                entry.set_value(existing)
+            self._biz_entries[key] = entry
+
+        # Country combobox (editable, defaults to United Kingdom)
+        crow = len(self._BIZ_FIELDS)
+        tk.Label(bf, text="Country:", anchor="w", width=16).grid(
+            row=crow, column=0, sticky="w", pady=4)
+        self._country_var = tk.StringVar(
+            value=self.db.get_setting("biz_country") or "United Kingdom")
+        ttk.Combobox(bf, textvariable=self._country_var, values=country_names(),
+                     width=28).grid(row=crow, column=1, sticky="w", pady=4,
+                                    padx=(4, 0), columnspan=2)
+
+        # Phone: dial-code combobox + number
+        prow = crow + 1
+        tk.Label(bf, text="Phone:", anchor="w", width=16).grid(
+            row=prow, column=0, sticky="w", pady=4)
+        self._phone_code_var = tk.StringVar(
+            value=label_for_code(self.db.get_setting("biz_phone_code") or "+44"))
+        ttk.Combobox(bf, textvariable=self._phone_code_var, values=dial_labels(),
+                     state="readonly", width=18).grid(row=prow, column=1,
+                                                      sticky="w", pady=4, padx=(4, 0))
+        self._phone_entry = PlaceholderEntry(bf, placeholder="7700 900123", width=14)
+        self._phone_entry.grid(row=prow, column=2, sticky="w", pady=4, padx=(4, 0))
+        existing_num = self.db.get_setting("biz_phone_number")
+        if existing_num:
+            self._phone_entry.set_value(existing_num)
+
+        self._migrate_legacy()
+
+        # ── Generic tabs ──
+        for tab_label, fields in self._GENERIC_TABS:
             f = tk.Frame(nb, padx=16, pady=10)
             nb.add(f, text=tab_label)
             for row, (label, key) in enumerate(fields):
@@ -1052,13 +1261,31 @@ class InvoiceSettingsDialog(tk.Toplevel):
                 var = tk.StringVar(value=default)
                 self._vars[key] = var
                 tk.Entry(f, textvariable=var, width=30).grid(
-                    row=row, column=1, sticky="w", pady=4, padx=(4,0))
-        bf = tk.Frame(self)
-        bf.pack(fill="x", padx=12, pady=(0,12))
-        ttk.Button(bf, text="Save",   command=self._save).pack(side="right", padx=4)
-        ttk.Button(bf, text="Cancel", command=self.destroy).pack(side="right", padx=4)
+                    row=row, column=1, sticky="w", pady=4, padx=(4, 0))
+
+        bar = tk.Frame(self)
+        bar.pack(fill="x", padx=12, pady=(0, 12))
+        ttk.Button(bar, text="Save",   command=self._save).pack(side="right", padx=4)
+        ttk.Button(bar, text="Cancel", command=self.destroy).pack(side="right", padx=4)
+
+    def _migrate_legacy(self):
+        """One-time convenience: seed new fields from legacy single-blob settings."""
+        structured = any(self.db.get_setting(k) for k in self._ADDR_KEYS)
+        legacy_addr = self.db.get_setting("biz_address")
+        if not structured and legacy_addr:
+            self._biz_entries["biz_addr_line1"].set_value(
+                ", ".join(part.strip() for part in legacy_addr.splitlines() if part.strip()))
+        if not self.db.get_setting("biz_phone_number"):
+            legacy_phone = self.db.get_setting("biz_phone")
+            if legacy_phone:
+                self._phone_entry.set_value(legacy_phone)
 
     def _save(self):
+        for key, entry in self._biz_entries.items():
+            self.db.set_setting(key, entry.get_value().strip())
+        self.db.set_setting("biz_country", self._country_var.get().strip())
+        self.db.set_setting("biz_phone_code", code_from_label(self._phone_code_var.get()))
+        self.db.set_setting("biz_phone_number", self._phone_entry.get_value().strip())
         for key, var in self._vars.items():
             self.db.set_setting(key, var.get().strip())
         self.destroy()
@@ -1140,17 +1367,31 @@ class GenerateInvoiceDialog(tk.Toplevel):
         mid.pack(fill="x", padx=12, pady=4)
 
         client_lf = tk.LabelFrame(mid, text=" Bill To ", padx=8, pady=6)
-        client_lf.pack(side="left", fill="both", expand=True, padx=(0,4))
+        client_lf.pack(side="left", fill="both", expand=True, padx=(0, 4))
 
-        tk.Label(client_lf, text="Name:", anchor="w").grid(row=0, column=0, sticky="w", pady=2)
-        self._client_name = tk.StringVar()
-        tk.Entry(client_lf, textvariable=self._client_name, width=26).grid(
-            row=0, column=1, sticky="w", pady=2, padx=(4,0))
+        self._client_name = PlaceholderEntry(client_lf, placeholder="Client Ltd", width=26)
+        self._client_fields = {}
+        client_rows = [
+            ("Name",         self._client_name),
+            ("Address 1",    PlaceholderEntry(client_lf, placeholder="123 Example St", width=26)),
+            ("Address 2",    PlaceholderEntry(client_lf, placeholder="Suite 4", width=26)),
+            ("City",         PlaceholderEntry(client_lf, placeholder="London", width=26)),
+            ("State/County", PlaceholderEntry(client_lf, placeholder="Greater London", width=26)),
+            ("Postcode/ZIP", PlaceholderEntry(client_lf, placeholder="SW1A 1AA", width=26)),
+        ]
+        for row, (label, widget) in enumerate(client_rows):
+            tk.Label(client_lf, text=label + ":", anchor="w").grid(
+                row=row, column=0, sticky="w", pady=2)
+            widget.grid(row=row, column=1, sticky="w", pady=2, padx=(4, 0))
+            if label != "Name":
+                self._client_fields[label] = widget
 
-        tk.Label(client_lf, text="Address:", anchor="w").grid(row=1, column=0, sticky="nw", pady=2)
-        self._client_addr = tk.Text(client_lf, width=26, height=4,
-                                     font=("Segoe UI", 9), relief="sunken", bd=1)
-        self._client_addr.grid(row=1, column=1, sticky="w", pady=2, padx=(4,0))
+        tk.Label(client_lf, text="Country:", anchor="w").grid(
+            row=len(client_rows), column=0, sticky="w", pady=2)
+        self._client_country = tk.StringVar(value="United Kingdom")
+        ttk.Combobox(client_lf, textvariable=self._client_country,
+                     values=country_names(), width=24).grid(
+            row=len(client_rows), column=1, sticky="w", pady=2, padx=(4, 0))
 
         inv_lf = tk.LabelFrame(mid, text=" Invoice Details ", padx=8, pady=6)
         inv_lf.pack(side="left", fill="both", expand=True)
@@ -1322,7 +1563,7 @@ class GenerateInvoiceDialog(tk.Toplevel):
                 "  .venv\\Scripts\\pip install reportlab",
                 parent=self)
             return
-        client = self._client_name.get().strip()
+        client = self._client_name.get_value().strip()
         if not client:
             messagebox.showwarning("Missing", "Please enter a client name.", parent=self)
             return
@@ -1352,11 +1593,32 @@ class GenerateInvoiceDialog(tk.Toplevel):
         total      = subtotal + tax_amount
         start, end = self._get_date_range()
 
+        biz_addr = compose_business_address(
+            [self.db.get_setting(k, "") for k in
+             ("biz_addr_line1", "biz_addr_line2", "biz_city",
+              "biz_county", "biz_postcode")],
+            self.db.get_setting("biz_country", ""),
+            self.db.get_setting("biz_address", ""),
+        )
+        biz_phone = compose_phone(
+            self.db.get_setting("biz_phone_code", ""),
+            self.db.get_setting("biz_phone_number", ""),
+        ) or self.db.get_setting("biz_phone", "")
+        client_addr = compose_address(
+            [self._client_fields["Address 1"].get_value(),
+             self._client_fields["Address 2"].get_value(),
+             self._client_fields["City"].get_value(),
+             self._client_fields["State/County"].get_value(),
+             self._client_fields["Postcode/ZIP"].get_value(),
+             self._client_country.get()],
+            sep="\n",
+        )
+
         pdf_data = {
             "biz_name":            self.db.get_setting("biz_name",""),
-            "biz_address":         self.db.get_setting("biz_address",""),
+            "biz_address":         biz_addr,
             "biz_email":           self.db.get_setting("biz_email",""),
-            "biz_phone":           self.db.get_setting("biz_phone",""),
+            "biz_phone":           biz_phone,
             "bank_account_name":   self.db.get_setting("bank_account_name",""),
             "bank_name":           self.db.get_setting("bank_name",""),
             "bank_account_number": self.db.get_setting("bank_account_number",""),
@@ -1365,7 +1627,7 @@ class GenerateInvoiceDialog(tk.Toplevel):
             "bank_bic":            self.db.get_setting("bank_bic",""),
             "currency":            cur,
             "client_name":         client,
-            "client_address":      self._client_addr.get("1.0", tk.END).strip(),
+            "client_address":      client_addr,
             "invoice_number":      self._inv_vars["Invoice #"].get().strip(),
             "issue_date":          self._inv_vars["Issue Date"].get().strip(),
             "due_date":            self._inv_vars["Due Date"].get().strip(),
@@ -1502,15 +1764,25 @@ class ManageJobsWindow(tk.Toplevel):
         self.on_change()
 
     def _add_proj(self):
-        job_id = self._job_id_for_sel()
-        if not job_id:
+        jobs = list(self.db.jobs())
+        job_ids = [j["id"] for j in jobs]
+        action, job_id = resolve_project_job(self._job_id_for_sel(), job_ids)
+
+        if action == "empty":
             messagebox.showinfo(
-                "Select a job first",
-                "Click on a job (or one of its projects) before adding a project.",
+                "No jobs yet",
+                "Add a job first, then you can add projects under it.",
                 parent=self,
             )
             return
-        job_name = self._tree.item(f"j{job_id}", "text").strip()
+        if action == "choose":
+            names = [j["name"] for j in jobs]
+            idx = ask_choice(self, "Add Project", "Which job is this project under?", names)
+            if idx is None:
+                return
+            job_id = jobs[idx]["id"]
+
+        job_name = next(j["name"] for j in jobs if j["id"] == job_id)
         name = ask_string(self, "Add Project", f"Project name  (under '{job_name}'):")
         if not name:
             return
@@ -1944,14 +2216,14 @@ class MainWindow(tk.Toplevel):
         # Toolbar
         tb = tk.Frame(self, pady=6)
         tb.pack(fill="x", padx=10)
-        ttk.Button(tb, text="▶  Start",       command=self.app.show_start).pack(side="left", padx=2)
-        ttk.Button(tb, text="■  Stop",         command=self.app.do_stop).pack(side="left",   padx=2)
-        ttk.Button(tb, text="+ Log Past Time", command=self._log_past).pack(side="left",    padx=2)
+        self._toggle_btn = ttk.Button(tb, text="▶  Start", command=self._toggle_track)
+        self._toggle_btn.pack(side="left", padx=2)
+        ttk.Button(tb, text="+ Log Past Time", command=self._log_past).pack(side="left", padx=2)
         ttk.Separator(tb, orient="vertical").pack(side="left", fill="y", padx=8, pady=2)
-        ttk.Button(tb, text="Manage Jobs…",    command=self._manage_jobs).pack(side="left", padx=2)
+        ttk.Button(tb, text="Manage jobs and projects", command=self._manage_jobs).pack(side="left", padx=2)
         ttk.Separator(tb, orient="vertical").pack(side="left", fill="y", padx=8, pady=2)
-        ttk.Button(tb, text="Generate Invoice…", command=self._generate_invoice).pack(side="left", padx=2)
-        ttk.Button(tb, text="Invoice Settings…", command=self._invoice_settings).pack(side="left", padx=2)
+        ttk.Button(tb, text="Generate Invoice", command=self._generate_invoice).pack(side="left", padx=2)
+        ttk.Button(tb, text="Invoice Settings", command=self._invoice_settings).pack(side="left", padx=2)
 
         # Tabs
         nb = ttk.Notebook(self)
@@ -2026,9 +2298,11 @@ class MainWindow(tk.Toplevel):
         self._refresh_summary("month")
         self._cal_tab.draw()
         self._tax_tab.refresh()
+        self._refresh_toggle_btn()
 
     def _tick(self):
         self._refresh_status()
+        self._refresh_toggle_btn()
         self._tick_id = self.after(1000, self._tick)
 
     def _refresh_status(self):
@@ -2039,6 +2313,19 @@ class MainWindow(tk.Toplevel):
             self._status_lbl.config(text=f"Tracking: {entry['job_name']}{proj}  [{fmt_hms(elapsed)}]")
         else:
             self._status_lbl.config(text="Not tracking")
+
+    def _refresh_toggle_btn(self):
+        if self.app.is_tracking():
+            self._toggle_btn.config(text="■  Stop")
+        else:
+            self._toggle_btn.config(text="▶  Start")
+
+    def _toggle_track(self):
+        if self.app.is_tracking():
+            self.app.do_stop()
+        else:
+            self.app.show_start()
+        self._refresh_toggle_btn()
 
     def _refresh_recent(self):
         for r in self._recent_tree.get_children():
@@ -2120,6 +2407,14 @@ class TimeTrackrApp:
         self.db   = Database()
         self.root = tk.Tk()
         self.root.withdraw()
+        # The root only hosts the Tk interpreter; it is never meant to be seen.
+        # A messagebox with parent=self.root (e.g. the quit-while-tracking prompt)
+        # forces its parent window to surface on macOS, flashing the empty root as
+        # a stray blank window. Making the root fully transparent and off-screen
+        # keeps it invisible even when a dialog surfaces it. (-alpha is a no-op on
+        # platforms that don't support it, so this stays cross-platform-safe.)
+        self.root.geometry("1x1-10000-10000")
+        self.root.attributes("-alpha", 0.0)
 
         self._entry_id  = None
         self._main_win  = None
@@ -2139,9 +2434,9 @@ class TimeTrackrApp:
             plat.MenuItem("Open Dashboard", self.show_dashboard, default=True),
             plat.SEPARATOR,
             plat.MenuItem("Start Tracking", self.show_start,
-                          enabled_when=lambda: self._entry_id is None),
+                          visible_when=lambda: self._entry_id is None),
             plat.MenuItem("Stop Tracking", self.do_stop,
-                          enabled_when=lambda: self._entry_id is not None),
+                          visible_when=lambda: self._entry_id is not None),
             plat.SEPARATOR,
             plat.MenuItem("Quit", self._quit),
         ]
@@ -2151,16 +2446,22 @@ class TimeTrackrApp:
     def _update_tray(self):
         self.tray.update_icon()
 
+    def is_tracking(self):
+        return self._entry_id is not None
+
     # ── Actions ───────────────────────────────────────────────────────────────
 
     def show_dashboard(self):
         if self._main_win and self._main_win.winfo_exists():
             self._main_win.deiconify()
-            self._main_win.lift()
-            self._main_win.focus_force()
-            return
-        self._main_win = MainWindow(self.root, self.db, self)
-        self._main_win.protocol("WM_DELETE_WINDOW", self._main_win.withdraw)
+        else:
+            self._main_win = MainWindow(self.root, self.db, self)
+            self._main_win.protocol("WM_DELETE_WINDOW", self._main_win.withdraw)
+        # Activate first so the window becomes key on macOS (accessory app),
+        # otherwise its buttons and close control swallow the first click.
+        plat.activate_app()
+        self._main_win.lift()
+        self._main_win.focus_force()
 
     def show_start(self):
         if self._entry_id is not None:

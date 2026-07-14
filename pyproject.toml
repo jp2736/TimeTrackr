@@ -1,0 +1,17 @@
+[project]
+name = "timetrackr"
+version = "0.1.0"
+description = "Cross-platform time tracker with a menu-bar / system-tray UI"
+requires-python = ">=3.9"
+dependencies = [
+    "pystray>=0.19.0",
+    "Pillow>=9.0.0",
+    "reportlab>=3.6.0",
+    "pyobjc-framework-Cocoa>=9.0 ; sys_platform == 'darwin'",
+]
+
+[tool.uv]
+# TimeTrackr is a run-in-place script app, not an installable library, so uv
+# only provisions the environment (the .venv) and never tries to build/install
+# the project itself.
+package = false
